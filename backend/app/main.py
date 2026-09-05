@@ -18,6 +18,10 @@ from app.memory import ConversationMemory
 import os
 
 
+# ==========================================
+# APP
+# ==========================================
+
 app = FastAPI(
     title="AI Agent API",
     description="Personal AI Agent Backend",
@@ -27,6 +31,10 @@ app = FastAPI(
 
 memory = ConversationMemory()
 
+
+# ==========================================
+# CORS
+# ==========================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,12 +49,20 @@ app.add_middleware(
 )
 
 
+# ==========================================
+# ROOT
+# ==========================================
+
 @app.get("/")
 def root():
     return {
         "message": "AI Agent API is running!"
     }
 
+
+# ==========================================
+# HEALTH
+# ==========================================
 
 @app.get("/health")
 def health():
