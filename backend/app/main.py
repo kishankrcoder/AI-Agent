@@ -2,6 +2,7 @@ from fastapi import (
     FastAPI,
     UploadFile,
     File,
+    HTTPException,
 )
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +43,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://ai-agent-ten-red.vercel.app",
+        "https://ai-agent-jzy58wcp7-aevion1.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -83,29 +85,43 @@ def chat_with_agent(
     request: ChatRequest
 ):
 
-    result = agent_graph.invoke({
-        "session_id": request.session_id,
-        "message": request.message,
-        "response": {},
-        "route": "",
-    })
+    try:
 
-    agent_response = result["response"]
+        result = agent_graph.invoke({
+            "session_id": request.session_id,
+            "message": request.message,
+            "response": {},
+            "route": "",
+        })
 
-    return {
-        "response": agent_response.get(
+        agent_response = result.get(
             "response",
-            ""
-        ),
-        "tool_usage": agent_response.get(
-            "tool_usage",
-            []
-        ),
-        "sources": agent_response.get(
-            "sources",
-            []
-        ),
-    }
+            {}
+        )
+
+        return {
+            "response": agent_response.get(
+                "response",
+                ""
+            ),
+            "tool_usage": agent_response.get(
+                "tool_usage",
+                []
+            ),
+            "sources": agent_response.get(
+                "sources",
+                []
+            ),
+        }
+
+    except Exception as e:
+
+        print("CHAT ERROR:", str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agent error: {str(e)}"
+        )
 
 
 # ==========================================
@@ -114,11 +130,13 @@ def chat_with_agent(
 
 @app.get("/conversations")
 def get_conversations():
+
     return memory.get_conversations()
 
 
 @app.post("/conversations")
 def create_conversation():
+
     return memory.create_conversation()
 
 
@@ -128,6 +146,7 @@ def create_conversation():
 def get_conversation_messages(
     session_id: str
 ):
+
     return memory.get_messages(
         session_id
     )
@@ -209,7 +228,7 @@ def delete_memory(
 
 
 # ==========================================
-# PDF
+# PDF UPLOAD
 # ==========================================
 
 @app.post("/upload-pdf")
@@ -219,37 +238,53 @@ async def upload_pdf(
 
     if file.content_type != "application/pdf":
 
-        return {
-            "filename": file.filename,
-            "message":
-            "Only PDF files are supported.",
-        }
-
-    os.makedirs(
-        "data",
-        exist_ok=True
-    )
-
-    file_path = os.path.join(
-        "data",
-        file.filename
-    )
-
-    with open(
-        file_path,
-        "wb"
-    ) as buffer:
-
-        buffer.write(
-            await file.read()
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported."
         )
 
-    result = ingest_pdf(
-        file_path,
-        document_name=file.filename,
-    )
+    try:
 
-    return {
-        "filename": file.filename,
-        "message": result,
-    }
+        os.makedirs(
+            "data",
+            exist_ok=True
+        )
+
+        safe_filename = os.path.basename(
+            file.filename
+        )
+
+        file_path = os.path.join(
+            "data",
+            safe_filename
+        )
+
+        file_content = await file.read()
+
+        with open(
+            file_path,
+            "wb"
+        ) as buffer:
+
+            buffer.write(
+                file_content
+            )
+
+        result = ingest_pdf(
+            file_path,
+            document_name=safe_filename,
+        )
+
+        return {
+            "filename": safe_filename,
+            "message": result,
+        }
+
+    except Exception as e:
+
+        print("PDF ERROR:", str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"PDF processing failed: {str(e)}"
+        )
