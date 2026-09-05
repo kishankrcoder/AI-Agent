@@ -3,7 +3,7 @@ from app.chunker import chunk_text
 from app.vector_store import add_chunks
 
 
-def ingest_pdf(file_path: str):
+def ingest_pdf(file_path: str, document_name: str = "document.pdf"):
     text = extract_text_from_pdf(file_path)
 
     if not text.strip():
@@ -11,6 +11,12 @@ def ingest_pdf(file_path: str):
 
     chunks = chunk_text(text)
 
-    add_chunks(chunks)
+    add_chunks(
+        chunks,
+        document_name=document_name,
+    )
 
-    return f"PDF processed successfully. {len(chunks)} chunks stored."
+    return (
+        f"PDF processed successfully. "
+        f"{len(chunks)} chunks stored."
+    )

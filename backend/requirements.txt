@@ -3,3 +3,9 @@ uvicorn
 pydantic
 python-dotenv
 ollama
+ddgs
+pypdf
+chromadb
+sentence-transformers
+python-multipart
+langgraph

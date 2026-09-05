@@ -1,13 +1,18 @@
 from typing import TypedDict
 
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import (
+    StateGraph,
+    START,
+    END,
+)
 
 from app.agent import AIAgent
 
 
 class AgentState(TypedDict):
+    session_id: str
     message: str
-    response: str
+    response: dict
     route: str
 
 
@@ -15,38 +20,48 @@ agent = AIAgent()
 
 
 def router_node(state: AgentState):
+
     message = state["message"].lower()
 
-    if any(word in message for word in [
-        "calculate",
-        "calculation",
-        "math",
-        "solve",
-        "+",
-        "-",
-        "*",
-        "/"
-    ]):
+    if any(
+        word in message
+        for word in [
+            "calculate",
+            "calculation",
+            "math",
+            "solve",
+            "+",
+            "-",
+            "*",
+            "/",
+        ]
+    ):
         route = "calculator"
 
-    elif any(word in message for word in [
-        "search",
-        "latest",
-        "current",
-        "today",
-        "news",
-        "internet",
-        "web"
-    ]):
+    elif any(
+        word in message
+        for word in [
+            "search",
+            "latest",
+            "current",
+            "today",
+            "news",
+            "internet",
+            "web",
+        ]
+    ):
         route = "web"
 
-    elif any(word in message for word in [
-        "pdf",
-        "document",
-        "uploaded",
-        "notes",
-        "chapter"
-    ]):
+    elif any(
+        word in message
+        for word in [
+            "pdf",
+            "document",
+            "uploaded",
+            "notes",
+            "chapter",
+        ]
+    ):
         route = "pdf"
 
     else:
@@ -58,10 +73,14 @@ def router_node(state: AgentState):
 
 
 def agent_node(state: AgentState):
-    response = agent.run(state["message"])
+
+    result = agent.run(
+        state["session_id"],
+        state["message"],
+    )
 
     return {
-        "response": response
+        "response": result
     }
 
 
@@ -69,12 +88,24 @@ def route_decision(state: AgentState):
     return state["route"]
 
 
-graph_builder = StateGraph(AgentState)
+graph_builder = StateGraph(
+    AgentState
+)
 
-graph_builder.add_node("router", router_node)
-graph_builder.add_node("agent", agent_node)
+graph_builder.add_node(
+    "router",
+    router_node
+)
 
-graph_builder.add_edge(START, "router")
+graph_builder.add_node(
+    "agent",
+    agent_node
+)
+
+graph_builder.add_edge(
+    START,
+    "router"
+)
 
 graph_builder.add_conditional_edges(
     "router",
@@ -84,9 +115,12 @@ graph_builder.add_conditional_edges(
         "web": "agent",
         "pdf": "agent",
         "normal": "agent",
-    }
+    },
 )
 
-graph_builder.add_edge("agent", END)
+graph_builder.add_edge(
+    "agent",
+    END
+)
 
 agent_graph = graph_builder.compile()
