@@ -1,4 +1,4 @@
-from ollama import chat
+from groq import Groq
 
 from app.config import OLLAMA_MODEL
 from app.memory import ConversationMemory
@@ -6,14 +6,22 @@ from app.web_search import web_search
 from app.calculator import calculator
 from app.vector_store import search_chunks
 
+import os
+
 
 class AIAgent:
 
     def __init__(self):
-        self.model = OLLAMA_MODEL
+        self.model = "llama-3.3-70b-versatile"
+        self.client = Groq(
+            api_key=os.getenv("GROQ_API_KEY")
+        )
         self.memory = ConversationMemory()
 
     def run(self, session_id: str, message: str):
+
+        tool_usage = []
+        sources = []
 
         self.memory.add_message(
             session_id,
@@ -23,24 +31,26 @@ class AIAgent:
 
         lower_message = message.lower().strip()
 
-        tool_usage = []
-        sources = []
-
         # ==========================================
         # PERSONAL MEMORY
         # ==========================================
 
         all_memories = self.memory.get_memories()
 
-        relevant_memories = self.memory.get_relevant_memories(
-            message,
-            max_memories=5
+        relevant_memories = (
+            self.memory.get_relevant_memories(
+                message,
+                max_memories=5
+            )
         )
 
         if not relevant_memories:
             relevant_memories = all_memories[:5]
 
-        # Direct name question
+        # ==========================================
+        # DIRECT NAME QUESTION
+        # ==========================================
+
         if any(
             phrase in lower_message
             for phrase in [
@@ -64,11 +74,6 @@ class AIAgent:
                     "The user's name is ",
                     "Your name is "
                 )
-            elif all_memories:
-                answer = (
-                    "I don't have your name specifically "
-                    "identified in memory yet."
-                )
             else:
                 answer = (
                     "I don't have your name saved yet. "
@@ -90,14 +95,6 @@ class AIAgent:
         # ==========================================
         # MEMORY EXTRACTION
         # ==========================================
-
-        memory_context = "\n".join(
-            f"- {item}"
-            for item in relevant_memories
-        )
-
-        if not memory_context:
-            memory_context = "No relevant personal memory found."
 
         memory_triggers = [
             "my name is",
@@ -139,7 +136,6 @@ class AIAgent:
                         "Output: The user's goal is to become "
                         "an AI engineer.\n\n"
                         "Return ONLY the fact.\n"
-                        "Do not explain anything.\n"
                         "If there is no useful personal fact, "
                         "return NONE."
                     ),
@@ -150,19 +146,21 @@ class AIAgent:
                 },
             ]
 
-            memory_response = chat(
+            memory_response = self.client.chat.completions.create(
                 model=self.model,
                 messages=memory_prompt,
+                temperature=0,
             )
 
             extracted_memory = (
-                memory_response.message.content.strip()
+                memory_response.choices[0].message.content.strip()
             )
 
             if (
                 extracted_memory
                 and extracted_memory.upper() != "NONE"
             ):
+
                 self.memory.add_memory(
                     extracted_memory
                 )
@@ -178,11 +176,6 @@ class AIAgent:
                     relevant_memories = (
                         self.memory.get_memories()[:5]
                     )
-
-                memory_context = "\n".join(
-                    f"- {item}"
-                    for item in relevant_memories
-                )
 
         # ==========================================
         # PDF / RAG
@@ -224,9 +217,7 @@ class AIAgent:
                 "status": "completed",
             })
 
-            sources.append(
-                "Uploaded PDF"
-            )
+            sources.append("Uploaded PDF")
 
             messages = [
                 {
@@ -248,12 +239,13 @@ class AIAgent:
                 },
             ]
 
-            response = chat(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
+                temperature=0.2,
             )
 
-            answer = response.message.content
+            answer = response.choices[0].message.content
 
             self.memory.add_message(
                 session_id,
@@ -277,8 +269,8 @@ class AIAgent:
                 "function": {
                     "name": "web_search",
                     "description": (
-                        "Search the web for current, "
-                        "recent, or up-to-date information."
+                        "Search the web for current, recent, "
+                        "or up-to-date information."
                     ),
                     "parameters": {
                         "type": "object",
@@ -316,20 +308,31 @@ class AIAgent:
         ]
 
         # ==========================================
+        # MEMORY CONTEXT
+        # ==========================================
+
+        memory_context = "\n".join(
+            f"- {item}"
+            for item in relevant_memories
+        )
+
+        if not memory_context:
+            memory_context = (
+                "No relevant personal memory found."
+            )
+
+        # ==========================================
         # SYSTEM PROMPT
         # ==========================================
 
         system_prompt = (
             "You are a helpful personal AI assistant.\n\n"
-
             "===== RELEVANT USER MEMORY =====\n"
             f"{memory_context}\n"
             "==================================\n\n"
-
             "Use the memory above whenever it is relevant.\n"
             "Do not claim that you do not know something "
             "if it is present in memory.\n\n"
-
             "Use web_search for current information.\n"
             "Use calculator for mathematical calculations.\n"
             "Do not invent information."
@@ -350,24 +353,47 @@ class AIAgent:
         # FIRST AI RESPONSE
         # ==========================================
 
-        response = chat(
+        response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             tools=tools,
+            tool_choice="auto",
+            temperature=0.2,
         )
+
+        assistant_message = response.choices[0].message
 
         # ==========================================
         # TOOL CALL
         # ==========================================
 
-        if response.message.tool_calls:
+        if assistant_message.tool_calls:
 
-            messages.append(response.message)
+            messages.append({
+                "role": "assistant",
+                "content": assistant_message.content,
+                "tool_calls": [
+                    {
+                        "id": tool_call.id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_call.function.name,
+                            "arguments": tool_call.function.arguments,
+                        },
+                    }
+                    for tool_call in assistant_message.tool_calls
+                ],
+            })
 
-            for tool_call in response.message.tool_calls:
+            for tool_call in assistant_message.tool_calls:
 
                 tool_name = tool_call.function.name
-                arguments = tool_call.function.arguments
+
+                import json
+
+                arguments = json.loads(
+                    tool_call.function.arguments
+                )
 
                 if tool_name == "web_search":
 
@@ -414,27 +440,35 @@ class AIAgent:
 
                 messages.append({
                     "role": "tool",
+                    "tool_call_id": tool_call.id,
                     "content": result,
                 })
 
-            # ======================================
+            # ==========================================
             # FINAL RESPONSE
-            # ======================================
+            # ==========================================
 
-            final_response = chat(
-                model=self.model,
-                messages=messages,
-                tools=tools,
+            final_response = (
+                self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.2,
+                )
             )
 
-            answer = final_response.message.content
+            answer = (
+                final_response
+                .choices[0]
+                .message
+                .content
+            )
 
         else:
 
-            answer = response.message.content
+            answer = assistant_message.content
 
         # ==========================================
-        # SAVE ASSISTANT RESPONSE
+        # SAVE RESPONSE
         # ==========================================
 
         self.memory.add_message(
