@@ -1,27 +1,33 @@
 from groq import Groq
 
-from app.config import OLLAMA_MODEL
 from app.memory import ConversationMemory
 from app.web_search import web_search
 from app.calculator import calculator
 from app.vector_store import search_chunks
 
 import os
+import json
 
 
 class AIAgent:
 
     def __init__(self):
-        self.model = "llama-3.3-70b-versatile"
+        self.model = "openai/gpt-oss-20b"
+
         self.client = Groq(
             api_key=os.getenv("GROQ_API_KEY")
         )
+
         self.memory = ConversationMemory()
 
     def run(self, session_id: str, message: str):
 
         tool_usage = []
         sources = []
+
+        # ==========================================
+        # SAVE USER MESSAGE
+        # ==========================================
 
         self.memory.add_message(
             session_id,
@@ -146,14 +152,20 @@ class AIAgent:
                 },
             ]
 
-            memory_response = self.client.chat.completions.create(
-                model=self.model,
-                messages=memory_prompt,
-                temperature=0,
+            memory_response = (
+                self.client.chat.completions.create(
+                    model=self.model,
+                    messages=memory_prompt,
+                    temperature=0,
+                )
             )
 
             extracted_memory = (
-                memory_response.choices[0].message.content.strip()
+                memory_response
+                .choices[0]
+                .message
+                .content
+                .strip()
             )
 
             if (
@@ -239,13 +251,20 @@ class AIAgent:
                 },
             ]
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.2,
+            response = (
+                self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.2,
+                )
             )
 
-            answer = response.choices[0].message.content
+            answer = (
+                response
+                .choices[0]
+                .message
+                .content
+            )
 
             self.memory.add_message(
                 session_id,
@@ -353,15 +372,19 @@ class AIAgent:
         # FIRST AI RESPONSE
         # ==========================================
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            temperature=0.2,
+        response = (
+            self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=0.2,
+            )
         )
 
-        assistant_message = response.choices[0].message
+        assistant_message = (
+            response.choices[0].message
+        )
 
         # ==========================================
         # TOOL CALL
@@ -387,13 +410,17 @@ class AIAgent:
 
             for tool_call in assistant_message.tool_calls:
 
-                tool_name = tool_call.function.name
-
-                import json
+                tool_name = (
+                    tool_call.function.name
+                )
 
                 arguments = json.loads(
                     tool_call.function.arguments
                 )
+
+                # ------------------------------
+                # WEB SEARCH
+                # ------------------------------
 
                 if tool_name == "web_search":
 
@@ -412,6 +439,10 @@ class AIAgent:
                     sources.append(
                         f"Web search: {query}"
                     )
+
+                # ------------------------------
+                # CALCULATOR
+                # ------------------------------
 
                 elif tool_name == "calculator":
 
